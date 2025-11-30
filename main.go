@@ -11,6 +11,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/gocolly/colly"
@@ -36,12 +37,28 @@ const (
 )
 
 var repertoires = map[cinema]string{
-	Kika:    "https://bilety.kinokika.pl",
-	Agrafka: "https://bilety.kinoagrafka.pl"}
+	Agrafka:     "https://bilety.kinoagrafka.pl",
+	CityBonarka: "https://www.cinema-city.pl/kina/bonarka/1090#/buy-tickets-by-cinema?in-cinema=1090",
+	Kijow:       "https://kupbilet.kijow.pl/MSI/mvc/?sort=Date",
+	Kika:        "https://bilety.kinokika.pl",
+	Mikro:       "https://kinomikro.pl/repertoire/?view=all",
+	Sfinks:      "https://kinosfinks.okn.edu.pl/wydarzenia.html"}
 
 type showing struct {
 	cinema cinema
 	time   time.Time
+}
+
+type siteConfig struct {
+	rootSel     string
+	titleSel    string
+	datetimeSel string
+	linkSel     string
+}
+
+type site struct {
+	cinema cinema
+	config siteConfig
 }
 
 type result struct {
@@ -51,16 +68,30 @@ type result struct {
 
 // var moviesMx sync.Mutex
 // var wg sync.WaitGroup
-
+var excludedByKeywords = [...]string{"UKRAINIAN DUBBING"}
+var removedKeywords = [...]string{"2D", "3D", "DUBBING"}
 var timeRegex = regexp.MustCompile("^(([0-1]?[0-9])|(2[0-3]))(:[0-5][0-9])+$")
 
 func main() {
-	cinemasToCheck := []cinema{Kika, Agrafka}
+	cinemasToCheck := [...]site{
+		{Kika,
+			siteConfig{
+				rootSel: "div.repertoire-once"}},
+		{Agrafka,
+			siteConfig{
+				rootSel: "div.repertoire-once"}},
+		{Kijow,
+			siteConfig{
+				rootSel: "div.cd-timeline-block",
+				linkSel: "a[href].eventcard.col-6"}}}
+
+	// answerCountdown := len(cinemasToCheck)
 	answerCountdown := len(cinemasToCheck) + 1
 	resultCh := make(chan result)
 
 	for _, cinema := range cinemasToCheck {
-		go parseCinemaKikaAgrafka(cinema, resultCh)
+		// timeouts
+		go scrapeCinema(cinema, resultCh)
 	}
 	go parseMultikino(Multikino, resultCh)
 
@@ -73,13 +104,28 @@ func main() {
 		receivedArr[result.cinema] = true
 
 		for k, v := range result.movies {
-			title := strings.ToUpper(strings.TrimSpace(k))
+			title := strings.ToUpper(k)
+
+			for _, kw := range excludedByKeywords {
+				if strings.Contains(title, kw) {
+					goto skip
+				}
+			}
+
+			for _, kw := range removedKeywords {
+				title = strings.ReplaceAll(title, kw, "")
+			}
+
+			title = strings.TrimSpace(title)
+
 			if showings, ok := movies[title]; ok {
 				movies[title] = append(showings, v...)
 			} else {
 				movies[title] = v
 				titles = append(titles, title)
 			}
+
+		skip:
 		}
 		answerCountdown -= 1
 		if answerCountdown == 0 {
@@ -96,7 +142,7 @@ func main() {
 		fmt.Print("\n\n")
 	}
 
-	fmt.Printf("TOTAL: %x \n", len(titles))
+	fmt.Printf("TOTAL: %d \n", len(titles))
 }
 
 func parseMultikino(cinema cinema, resultCh chan result) {
@@ -156,30 +202,45 @@ func parseMultikino(cinema cinema, resultCh chan result) {
 	resultCh <- result{cinema: Multikino, movies: movies}
 }
 
-func parseCinemaKikaAgrafka(cinema cinema, resultCh chan result) {
-	c := colly.NewCollector()
+func scrapeCinema(site site, resultCh chan result) {
+	cinema := site.cinema
+	config := site.config
+
+	c := colly.NewCollector(
+		colly.MaxDepth(1),
+	)
+	c.RedirectHandler = redirect
+
 	c.OnRequest(func(r *colly.Request) {
 		fmt.Println("Site: ", r.URL.String())
 	})
 
 	movies := make(map[string][]showing)
-	var showing showing
-	showing.cinema = cinema
+	var moviesMx sync.Mutex
 
-	c.OnHTML("div.repertoire-once", func(e *colly.HTMLElement) {
-		title := e.DOM.Find("div[class*=title]").Find("a").Text()
+	c.OnHTML(config.rootSel, func(e *colly.HTMLElement) {
+		title := getTitle(cinema, e)
 		if title == "" {
 			return
 		}
 
-		dateRaw := e.DOM.Find("div[class*=date]").Text()
-		dateLines := strings.Split(dateRaw, "\n")
-		dateLines = dateLines[len(dateLines)-2:]
-		dateRaw = strings.Join(dateLines, "")
-		showing.time = processDateTimeString(dateRaw)
+		dateTimes := getDateTimes(cinema, e)
+		if len(dateTimes) == 0 {
+			return
+		}
 
-		movies[title] = append(movies[title], showing)
+		moviesMx.Lock()
+		defer moviesMx.Unlock()
+		for _, dateTime := range dateTimes {
+			movies[title] = append(movies[title], showing{cinema, dateTime})
+		}
 	})
+
+	if config.linkSel != "" {
+		c.OnHTML(config.linkSel, func(e *colly.HTMLElement) {
+			visitNext(cinema, e)
+		})
+	}
 
 	c.Visit(repertoires[cinema])
 	c.Wait()
@@ -213,7 +274,7 @@ func processDateTimeString(rawDateTime string) time.Time {
 				year = dateTimeInt
 			}
 		} else if day != 0 && month == 0 {
-			month = mapMonthName(dateTime)
+			month = mapMonth(dateTime)
 		} else if timeRegex.MatchString(dateTime) {
 			hourMinuteSecond := strings.Split(dateTime, ":")
 			hour, _ = strconv.Atoi(hourMinuteSecond[0])
@@ -229,22 +290,89 @@ func processDateTimeString(rawDateTime string) time.Time {
 	return time.Date(year, time.Month(month), day, hour, minute, 0, 0, location)
 }
 
-func mapMonthName(month string) time.Month {
-	months := map[string]time.Month{
-		"sty": time.January,
-		"lut": time.February,
-		"mar": time.March,
-		"kwi": time.April,
-		"maj": time.May,
-		"cze": time.June,
-		"lip": time.July,
-		"sie": time.August,
-		"wrz": time.September,
-		"paz": time.October,
-		"paź": time.October,
-		"lis": time.November,
-		"gru": time.December,
+func mapMonth(monthStr string) time.Month {
+	var month time.Month
+
+	switch strings.ToLower(monthStr[:3]) {
+	case "sty":
+		month = time.January
+	case "lut":
+		month = time.February
+	case "mar":
+		month = time.March
+	case "kwi":
+		month = time.April
+	case "maj":
+		month = time.May
+	case "cze":
+		month = time.June
+	case "lip":
+		month = time.July
+	case "sie":
+		month = time.August
+	case "wrz":
+		month = time.September
+	case "paz", "paź":
+		month = time.October
+	case "lis":
+		month = time.November
+	case "gru":
+		month = time.December
 	}
 
-	return months[strings.ToLower(month[:3])]
+	return month
+}
+
+func getTitle(cinema cinema, e *colly.HTMLElement) string {
+	var title string
+	switch cinema {
+	case Kika, Agrafka:
+		title = e.DOM.Find("a").First().Text()
+
+	case Kijow:
+		title = e.DOM.Find("h2").After("i").Text()
+	}
+
+	return title
+}
+
+func getDateTimes(cinema cinema, e *colly.HTMLElement) []time.Time {
+	var dateTimeStrs = []string{}
+	switch cinema {
+	case Kika, Agrafka:
+		dateRaw := e.DOM.Find("div.date").Text()
+		dateLines := strings.Split(dateRaw, "\n")
+		dateLines = dateLines[len(dateLines)-2:]
+		dateRaw = strings.Join(dateLines, "")
+		dateTimeStrs = append(dateTimeStrs, dateRaw)
+
+	case Kijow:
+		dateRaw := e.DOM.Find("span.cd-date").Text()
+		dateTimeStrs = append(dateTimeStrs, dateRaw)
+	}
+
+	var dateTimes = make([]time.Time, len(dateTimeStrs))
+	for i, e := range dateTimeStrs {
+		dateTimes[i] = processDateTimeString(e)
+	}
+	return dateTimes
+}
+
+func visitNext(cinema cinema, e *colly.HTMLElement) {
+	switch cinema {
+	case Kijow:
+		month := e.DOM.Find("span.daynumber:not(.active)").Text()
+		if month != "" {
+			link := e.Attr("href")
+			e.Request.Visit(link)
+		}
+
+	default:
+		return
+	}
+}
+
+func redirect(req *http.Request, via []*http.Request) error {
+	fmt.Println("REDIRECTEDDDDDDDDDDDDDDDDDDDDDDDDDDDDD")
+	return colly.ErrAlreadyVisited
 }
