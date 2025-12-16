@@ -46,7 +46,7 @@ var repertoires = map[cinema]string{
 	Kika:        "https://bilety.kinokika.pl",
 	Mikro:       "https://kinomikro.pl/repertoire/?view=all",
 	Paradox:     "https://kinoparadox.pl/repertuar/",
-	PodBaranami: "https://www.kinopodbaranami.pl/repertuar.php",
+	PodBaranami: "https://kinopodbaranami.pl/repertuar.php",
 	Sfinks:      "https://kinosfinks.okn.edu.pl/wydarzenia.html"}
 
 var cinemaApiIds = map[cinema]string{
@@ -57,12 +57,12 @@ var cinemaApiIds = map[cinema]string{
 }
 
 var apiUrls = map[string]string{
-	"MultikinoJWT":        "https://www.multikino.pl/api/microservice",
-	"MultikinoFilmsStart": "https://www.multikino.pl/api/microservice/showings/cinemas/",
+	"MultikinoJWT":        "https://multikino.pl/api/microservice",
+	"MultikinoFilmsStart": "https://multikino.pl/api/microservice/showings/cinemas/",
 	"MultikinoFilmsEnd":   "/films/",
-	"CityDatesStart":      "https://www.cinema-city.pl/pl/data-api-service/v1/quickbook/10103/dates/in-cinema/",
+	"CityDatesStart":      "https://cinema-city.pl/pl/data-api-service/v1/quickbook/10103/dates/in-cinema/",
 	"CityDatesEnd":        "/until/",
-	"CityFilmsStart":      "https://www.cinema-city.pl/pl/data-api-service/v1/quickbook/10103/film-events/in-cinema/",
+	"CityFilmsStart":      "https://cinema-city.pl/pl/data-api-service/v1/quickbook/10103/film-events/in-cinema/",
 	"CityFilmsEnd":        "/at-date/",
 }
 
@@ -93,15 +93,16 @@ type result struct {
 
 // var moviesMx sync.Mutex
 // var wg sync.WaitGroup
-var excludedByKeywords = [...]string{"UKRAINIAN", "UKRAIŃSKI", "DKF KROPKA DLA", "KLUB SENIORA"}
-var removedKeywords = [...]string{"2D", "3D", "DUBBING", "NAPISY", "TANI WTOREK:"}
+var excludedByKeywords = [...]string{"UKRAINIAN", "UKRAIŃSKI", "DLA OSÓB", "KLUB SENIORA"}
+// remove weird punctionam arks at teh end
+var removedKeywords = [...]string{"2D", "3D", "- DUBBING", "DUBBING", " - NAPISY", "NAPISY",
+"TANI WTOREK:", "DKF KROPKA:", "DKF PEŁNA SALA:",
+	"- PRZEDPREMIERA", "+ ENG SUB", "- POKAZ SPECJALNY Z DYSKUSJĄ", "– WERSJA REŻYSERSKA",
+"POKAZ SPECJALNY"}
 var timeRegex = regexp.MustCompile("^(([0-1]?[0-9])|(2[0-3]))(:[0-5][0-9])+$")
 
 func main() {
 	cinemasToScrape := [...]site{
-		{Kika,
-			siteConfig{
-				rootSel: "div.repertoire-once"}},
 		{Agrafka,
 			siteConfig{
 				rootSel: "div.repertoire-once"}},
@@ -109,29 +110,23 @@ func main() {
 			siteConfig{
 				rootSel: "div.cd-timeline-block",
 				linkSel: "a[href].eventcard.col-6"}},
+		{Kika,
+			siteConfig{
+				rootSel: "div.repertoire-once"}},
+		{Paradox,
+			siteConfig{
+				rootSel: "div.list-item__content__row"}},
+		{Mikro,
+			siteConfig{
+				rootSel: "section.row"}},
 		{PodBaranami,
 			siteConfig{
 				rootSel: "li[title]",
 				charSet: "iso-8859-2"}},
-		{Paradox,
-			siteConfig{
-				rootSel: "div.list-item__content__row"}},
 		{Sfinks,
 			siteConfig{
 				rootSel: "span.zajawka",
 				linkSel: "a[title^='Strona'][href]"}},
-		// {Paradox,
-		// 	siteConfig{
-		// 		groupDateSel:  "div.list-item__date",
-		// 		groupTitleSel: "a.item-title",
-		// 		groupSel:      "div.list-item"}},
-		// {PodBaranami,
-		// 	siteConfig{
-		// 		// rootSel:      "li[title]",
-		// 		groupDateSel: "p.rep_date",
-		// 		groupItemSel: "li[title]",
-		// 		groupSel:     "ul.program_list",
-		// 		charSet:      "iso-8859-2"}},
 	}
 
 	cinemasToFetch := [...]site{
@@ -446,41 +441,7 @@ func scrapeCinema(site site, resultCh chan result) {
 		})
 	}
 
-	if config.groupDateSel != "" && config.groupSel != "" {
-		groupDates := []string{}
-		groupDateCounter := 0
-		c.OnHTML(config.groupDateSel, func(e *colly.HTMLElement) {
-			// call getDateTimes
-			groupDates = append(groupDates, e.DOM.Text())
-		})
-
-		c.OnHTML(config.groupSel, func(e *colly.HTMLElement) {
-			// fmt.Println(groupDates[groupDateCounter])
-			e.ForEach(config.groupItemSel, func(i int, f *colly.HTMLElement) {
-				title := getTitle(cinema, f)
-				if title == "" {
-					return
-				}
-
-				// if groupDate != "" {
-				// 	fmt.Println(groupDate)
-				// }
-				dateTimes := getDateTimes(cinema, f, groupDates[groupDateCounter])
-				// dateTimes := getDateTimes(cinema, e, groupDate)
-				// if len(dateTimes) == 0 {
-				// 	return
-				// }
-
-				moviesMx.Lock()
-				defer moviesMx.Unlock()
-				for _, dateTime := range dateTimes {
-					movies[title] = append(movies[title], showing{cinema, dateTime})
-				}
-			})
-			groupDateCounter++
-		})
-	}
-
+	var lastDate string
 	c.OnHTML(config.rootSel, func(e *colly.HTMLElement) {
 		title := getTitle(cinema, e)
 		// if cinema == Kijow {
@@ -494,7 +455,7 @@ func scrapeCinema(site site, resultCh chan result) {
 		// 	fmt.Println(groupDate)
 		// }
 		// proper error handling
-		dateTimes := getDateTimes(cinema, e, "")
+		dateTimes := getDateTimes(cinema, e, &lastDate)
 		// dateTimes := getDateTimes(cinema, e, groupDate)
 		// if cinema == Kijow {
 		// 	fmt.Println(dateTimes)
@@ -634,12 +595,15 @@ func getTitle(cinema cinema, e *colly.HTMLElement) string {
 
 	case Sfinks:
 		title = e.DOM.Find("span.title").Text()
+
+	case Mikro:
+		title = e.DOM.Find("a.repertoire-item-title").Text()
 	}
 
 	return title
 }
 
-func getDateTimes(cinema cinema, e *colly.HTMLElement, groupDate string) []time.Time {
+func getDateTimes(cinema cinema, e *colly.HTMLElement, lastDate *string) []time.Time {
 	var dateTimeStrs = []string{}
 	switch cinema {
 	case Kika, Agrafka:
@@ -647,13 +611,10 @@ func getDateTimes(cinema cinema, e *colly.HTMLElement, groupDate string) []time.
 		dateLines := strings.Split(dateRaw, "\n")
 		dateLines = dateLines[len(dateLines)-2:]
 		dateRaw = strings.Join(dateLines, "")
-		dateRaw = groupDate + " " + dateRaw
 		dateTimeStrs = append(dateTimeStrs, dateRaw)
 
 	case Kijow:
 		dateRaw := e.DOM.Find("span.cd-date").Text()
-		dateRaw = groupDate + " " + dateRaw
-		// fmt.Println(dateRaw)
 		dateTimeStrs = append(dateTimeStrs, dateRaw)
 
 	case PodBaranami:
@@ -664,21 +625,32 @@ func getDateTimes(cinema cinema, e *colly.HTMLElement, groupDate string) []time.
 		}
 		onClickWords := strings.Split(onclickStr, ",")
 		dateRaw := onClickWords[len(onClickWords)-5]
-		dateRaw = groupDate + " " + dateRaw + " " + timeRaw
+		dateRaw = dateRaw + " " + timeRaw
 		dateTimeStrs = append(dateTimeStrs, dateRaw)
 
 	case Paradox:
 		dateRaw, _ := e.DOM.Attr("data-date")
 		timeRaw := e.DOM.Find("div.item-time").Text()
-		dateRaw = groupDate + " " + dateRaw + " " + timeRaw
+		dateRaw = dateRaw + " " + timeRaw
 		// fmt.Println(dateRaw)
 		dateTimeStrs = append(dateTimeStrs, dateRaw)
 
 	case Sfinks:
+		fmt.Println(lastDate)
 		dateTimeElement := e.DOM.Find("span.kali_data_od")
 		dateRaw := dateTimeElement.Find("span").First().Text()
 		timeRaw := dateTimeElement.Find("span").Eq(2).Text()
-		dateRaw = groupDate + " " + dateRaw + " " + timeRaw
+		dateRaw = dateRaw + " " + timeRaw
+		dateTimeStrs = append(dateTimeStrs, dateRaw)
+
+	case Mikro:
+		dateElementMaybe := e.DOM.Find("div.repertoire-separator")
+		if dateElementMaybe.Length() != 0 {
+			*lastDate = dateElementMaybe.Text()
+		}
+		dateRaw := *lastDate
+		timeRaw := e.DOM.Find("p.repertoire-item-hour").Text()
+		dateRaw = dateRaw + " " + timeRaw
 		dateTimeStrs = append(dateTimeStrs, dateRaw)
 	}
 
@@ -709,8 +681,3 @@ func visitNext(cinema cinema, e *colly.HTMLElement) error {
 	}
 	return err
 }
-
-// func redirect(req *http.Request, via []*http.Request) error {
-// 	fmt.Println("REDIRECTEDDDDDDDDDDDDDDDDDDDDDDDDDDDDD")
-// 	return colly.ErrAlreadyVisited
-// }
