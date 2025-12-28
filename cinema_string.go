@@ -9,22 +9,22 @@ func _() {
 	// Re-run the stringer command to generate them again.
 	var x [1]struct{}
 	_ = x[Agrafka-0]
-	_ = x[CityBonarka-1]
-	_ = x[CityKazimierz-2]
-	_ = x[CityZakopianka-3]
-	_ = x[IMAX-4]
-	_ = x[Kijow-5]
-	_ = x[Kika-6]
-	_ = x[Mikro-7]
-	_ = x[PodBaranami-8]
-	_ = x[Multikino-9]
-	_ = x[Paradox-10]
-	_ = x[Sfinks-11]
+	_ = x[CCityBonarka-1]
+	_ = x[CCityKazimierz-2]
+	_ = x[CCityZakopianka-3]
+	_ = x[Kijow-4]
+	_ = x[Kika-5]
+	_ = x[Mikro-6]
+	_ = x[PodBaranami-7]
+	_ = x[Multikino-8]
+	_ = x[Paradox-9]
+	_ = x[Sfinks-10]
+	_ = x[LAST-11]
 }
 
-const _cinema_name = "AgrafkaCityBonarkaCityKazimierzCityZakopiankaIMAXKijowKikaMikroPodBaranamiMultikinoParadoxSfinks"
+const _cinema_name = "AgrafkaCCityBonarkaCCityKazimierzCCityZakopiankaKijowKikaMikroPodBaranamiMultikinoParadoxSfinksLAST"
 
-var _cinema_index = [...]uint8{0, 7, 18, 31, 45, 49, 54, 58, 63, 74, 83, 90, 96}
+var _cinema_index = [...]uint8{0, 7, 19, 33, 48, 53, 57, 62, 73, 82, 89, 95, 99}
 
 func (i cinema) String() string {
 	idx := int(i) - 0

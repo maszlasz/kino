@@ -13,7 +13,6 @@ import (
 	"sort"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/gocolly/colly"
@@ -23,13 +22,11 @@ import (
 
 //go:generate stringer -type=cinema
 type cinema int
-
 const (
 	Agrafka cinema = iota
-	CityBonarka
-	CityKazimierz
-	CityZakopianka
-	IMAX
+	CCityBonarka
+	CCityKazimierz
+	CCityZakopianka
 	Kijow
 	Kika
 	Mikro
@@ -40,45 +37,16 @@ const (
 	LAST
 )
 
-var repertoires = map[cinema]string{
-	Agrafka:     "https://bilety.kinoagrafka.pl",
-	Kijow:       "https://kupbilet.kijow.pl/MSI/mvc/?sort=Date",
-	Kika:        "https://bilety.kinokika.pl",
-	Mikro:       "https://kinomikro.pl/repertoire/?view=all",
-	Paradox:     "https://kinoparadox.pl/repertuar/",
-	PodBaranami: "https://kinopodbaranami.pl/repertuar.php",
-	Sfinks:      "https://kinosfinks.okn.edu.pl/wydarzenia.html"}
-
-var cinemaApiIds = map[cinema]string{
-	Multikino:      "0005",
-	CityBonarka:    "1090",
-	CityKazimierz:  "1076",
-	CityZakopianka: "1064",
-}
-
-var apiUrls = map[string]string{
-	"MultikinoJWT":        "https://multikino.pl/api/microservice",
-	"MultikinoFilmsStart": "https://multikino.pl/api/microservice/showings/cinemas/",
-	"MultikinoFilmsEnd":   "/films/",
-	"CityDatesStart":      "https://cinema-city.pl/pl/data-api-service/v1/quickbook/10103/dates/in-cinema/",
-	"CityDatesEnd":        "/until/",
-	"CityFilmsStart":      "https://cinema-city.pl/pl/data-api-service/v1/quickbook/10103/film-events/in-cinema/",
-	"CityFilmsEnd":        "/at-date/",
-}
-
 type showing struct {
 	cinema cinema
 	time   time.Time
 }
 
 type siteConfig struct {
-	rootSel      string
-	linkSel      string
-	groupDateSel string
-	groupItemSel string
-	groupSel     string
-	charSet      string
-	processFun   func(cinema, chan result)
+	rootSel    string
+	linkSel    string
+	charSet    string
+	processFun func(cinema, chan result)
 }
 
 type site struct {
@@ -88,17 +56,44 @@ type site struct {
 
 type result struct {
 	cinema cinema
+	// TODO map of string to time
 	movies map[string][]showing
 }
 
-// var moviesMx sync.Mutex
-// var wg sync.WaitGroup
+var repertoires = map[cinema]string{
+	Agrafka:     "https://bilety.kinoagrafka.pl",
+	Kijow:       "https://kupbilet.kijow.pl/MSI/mvc/pl?sort=Date&date=1970-01&datestart=0",
+	Kika:        "https://bilety.kinokika.pl",
+	Mikro:       "https://kinomikro.pl/repertoire/?view=all",
+	Paradox:     "https://kinoparadox.pl/repertuar/",
+	PodBaranami: "https://kinopodbaranami.pl/repertuar.php",
+	Sfinks:      "https://kinosfinks.okn.edu.pl/wydarzenia-szukaj-strona-1.html",
+}
+
+var cinemaApiIds = map[cinema]string{
+	Multikino:       "0005",
+	CCityBonarka:    "1090",
+	CCityKazimierz:  "1076",
+	CCityZakopianka: "1064",
+}
+
+var apiUrls = map[string]string{
+	"MultikinoJWT":        "https://multikino.pl/api/microservice",
+	"MultikinoFilmsStart": "https://multikino.pl/api/microservice/showings/cinemas/",
+	"MultikinoFilmsEnd":   "/films/",
+	"CCityDatesStart":     "https://cinema-city.pl/pl/data-api-service/v1/quickbook/10103/dates/in-cinema/",
+	"CCityDatesEnd":       "/until/",
+	"CCityFilmsStart":     "https://cinema-city.pl/pl/data-api-service/v1/quickbook/10103/film-events/in-cinema/",
+	"CCityFilmsEnd":       "/at-date/",
+}
+
 var excludedByKeywords = [...]string{"UKRAINIAN", "UKRAIŃSKI", "DLA OSÓB", "KLUB SENIORA"}
-// remove weird punctionam arks at teh end
+
 var removedKeywords = [...]string{"2D", "3D", "- DUBBING", "DUBBING", " - NAPISY", "NAPISY",
-"TANI WTOREK:", "DKF KROPKA:", "DKF PEŁNA SALA:",
+	"TANI WTOREK:", "DKF KROPKA:", "DKF PEŁNA SALA:", "DKF KROPKA DLA DZIECI:",
 	"- PRZEDPREMIERA", "+ ENG SUB", "- POKAZ SPECJALNY Z DYSKUSJĄ", "– WERSJA REŻYSERSKA",
-"POKAZ SPECJALNY"}
+	"- POKAZ SPECJALNY", "POKAZ SPECJALNY"}
+
 var timeRegex = regexp.MustCompile("^(([0-1]?[0-9])|(2[0-3]))(:[0-5][0-9])+$")
 
 func main() {
@@ -126,22 +121,22 @@ func main() {
 		{Sfinks,
 			siteConfig{
 				rootSel: "span.zajawka",
-				linkSel: "a[title^='Strona'][href]"}},
+				linkSel: "a[href][title^='Strona']"}},
 	}
 
 	cinemasToFetch := [...]site{
 		{Multikino,
 			siteConfig{
 				processFun: parseMultikino}},
-		{CityBonarka,
+		{CCityBonarka,
 			siteConfig{
-				processFun: parseCity}},
-		{CityKazimierz,
+				processFun: parseCCity}},
+		{CCityKazimierz,
 			siteConfig{
-				processFun: parseCity}},
-		{CityZakopianka,
+				processFun: parseCCity}},
+		{CCityZakopianka,
 			siteConfig{
-				processFun: parseCity}},
+				processFun: parseCCity}},
 	}
 
 	answerCountdown := len(cinemasToScrape) + len(cinemasToFetch)
@@ -160,8 +155,16 @@ func main() {
 	movies := map[string][]showing{}
 	titles := []string{}
 
+WaitForCinemas:
 	for {
-		result := <-resultCh
+		var result result
+		select {
+		case result = <-resultCh:
+
+		case <-time.After(10 * time.Second):
+			break WaitForCinemas
+		}
+
 		receivedArr[result.cinema] = true
 		var lenT int
 
@@ -170,7 +173,7 @@ func main() {
 
 			for _, kw := range excludedByKeywords {
 				if strings.Contains(title, kw) {
-					goto skip
+					goto skipMovie
 				}
 			}
 
@@ -179,6 +182,7 @@ func main() {
 			}
 			title = strings.TrimSpace(title)
 
+			// remove any text in parentheses at the end like '(dubbing)'
 			lenT = len(title)
 			for title[lenT-1] == ')' && title[0] != '(' {
 				for i := range lenT {
@@ -198,7 +202,7 @@ func main() {
 				titles = append(titles, title)
 			}
 
-		skip:
+		skipMovie:
 		}
 
 		answerCountdown -= 1
@@ -215,7 +219,6 @@ func main() {
 
 	collator := collate.New(language.Polish)
 	collator.SortStrings(titles)
-	// slices.Sort(titles)
 
 	for _, title := range titles {
 		fmt.Printf("|%s|\n", title)
@@ -226,6 +229,21 @@ func main() {
 	}
 
 	fmt.Printf("TOTAL: %d \n", len(titles))
+
+	fmt.Println("RESULTS NOT RECEIVED FROM:")
+	for cinemaIndex, received := range receivedArr {
+		if !received {
+			fmt.Println(cinema(cinemaIndex))
+		}
+	}
+
+	now := time.Now()
+	filepath := fmt.Sprintf("titles/%d-%d-%d.txt", now.Year(), now.Month(), now.Day())
+	f, _ := os.Create(filepath)
+	defer f.Close()
+	for _, title := range titles {
+		f.WriteString(title + "\n")
+	}
 }
 
 func parseMultikino(cinema cinema, resultCh chan result) {
@@ -242,6 +260,7 @@ func parseMultikino(cinema cinema, resultCh chan result) {
 	res, err := client.Do(req)
 	if err != nil {
 		log.Println(err)
+		return
 	}
 	res.Body.Close()
 
@@ -257,7 +276,8 @@ func parseMultikino(cinema cinema, resultCh chan result) {
 	var body map[string]any
 	bodyBytes, _ := io.ReadAll(res.Body)
 	if err := json.Unmarshal(bodyBytes, &body); err != nil {
-		panic(err)
+		log.Println(err)
+		return
 	}
 
 	movies := make(map[string][]showing)
@@ -286,52 +306,29 @@ func parseMultikino(cinema cinema, resultCh chan result) {
 	resultCh <- result{cinema: Multikino, movies: movies}
 }
 
-func parseCity(cinema cinema, resultCh chan result) {
+func parseCCity(cinema cinema, resultCh chan result) {
 	client := &http.Client{}
 
-	// jar, err := cookiejar.New(nil)
-	// if err != nil {
-	// 	log.Println(err)
-	// }
-	// client.Jar = jar
-
-	// Obtain JWTs
-	// req, _ := http.NewRequest("GET", "https://www.cinema-city.pl", nil)
-	// res, err := client.Do(req)
-	// if err != nil {
-	// 	log.Println(err)
-	// }
-	// res.Body.Close()
-
-	// req, _ := http.NewRequest("GET", "https://www.cinema-city.pl/pl/data-api-service/v1/quickbook/10103/dates/in-cinema/1090/until/2026-11-30", nil)
-
-	// res, err := client.Do(req)
-	// if err != nil {
-	// 	log.Println(err)
-	// }
-	// fmt.Println(res.Header)
-	// fmt.Println(string(res.Body))
-	// res.Body.Close()
-	datesBasePath := apiUrls["CityDatesStart"] + cinemaApiIds[cinema] + apiUrls["CityDatesEnd"]
+	datesBasePath := apiUrls["CCityDatesStart"] + cinemaApiIds[cinema] + apiUrls["CCityDatesEnd"]
 	now := time.Now()
 	today := fmt.Sprintf("%d-%02d-%02d", now.Year()+1, now.Month(), now.Day())
 	datesTodayPath := datesBasePath + today
-	// fmt.Println(datesTodayPath)
+
 	req, _ := http.NewRequest("GET", datesTodayPath, nil)
-	// req, _ = http.NewRequest("GET", "https://www.multikino.pl/api/microservice/showings/cinemas/0005/films", nil)
 	res, err := client.Do(req)
 	if err != nil {
+		// TODO panics maybe?
 		log.Println(err)
 		return
 	}
-	// fmt.Println(res.Header)
 
 	var body map[string]any
 	bodyBytes, _ := io.ReadAll(res.Body)
 	if err := json.Unmarshal(bodyBytes, &body); err != nil {
-		panic(err)
+		log.Println(err)
+		return
 	}
-	// fmt.Println(body)
+
 	body = body["body"].(map[string]any)
 	dateRaws := body["dates"].([]any)
 	var dates = []string{}
@@ -339,17 +336,24 @@ func parseCity(cinema cinema, resultCh chan result) {
 		dates = append(dates, dateRaw.(string))
 	}
 	res.Body.Close()
-	// fmt.Println(dates)
 
 	moviesCh := make(chan map[string][]showing)
 	for _, date := range dates {
-		go parseCityDay(cinema, date, moviesCh)
+		go parseCCityDay(cinema, date, moviesCh)
 	}
 
 	movies := make(map[string][]showing)
 	answerCountdown := len(dates)
+
+WaitForCCityDay:
 	for answerCountdown > 0 {
-		dayMovies := <-moviesCh
+		var dayMovies map[string][]showing
+		select {
+		case dayMovies = <-moviesCh:
+
+		case <-time.After(5 * time.Second):
+			break WaitForCCityDay
+		}
 
 		for dayTitle, dayShowings := range dayMovies {
 			if showings, ok := movies[dayTitle]; ok {
@@ -364,9 +368,9 @@ func parseCity(cinema cinema, resultCh chan result) {
 	resultCh <- result{cinema: cinema, movies: movies}
 }
 
-func parseCityDay(cinema cinema, date string, moviesCh chan map[string][]showing) {
+func parseCCityDay(cinema cinema, date string, moviesCh chan map[string][]showing) {
 	client := &http.Client{}
-	moviesBasePath := apiUrls["CityFilmsStart"] + cinemaApiIds[cinema] + apiUrls["CityFilmsEnd"]
+	moviesBasePath := apiUrls["CCityFilmsStart"] + cinemaApiIds[cinema] + apiUrls["CCityFilmsEnd"]
 	req, _ := http.NewRequest("GET", moviesBasePath+date, nil)
 	res, err := client.Do(req)
 	if err != nil {
@@ -377,7 +381,8 @@ func parseCityDay(cinema cinema, date string, moviesCh chan map[string][]showing
 	var body map[string]any
 	bodyBytes, _ := io.ReadAll(res.Body)
 	if err := json.Unmarshal(bodyBytes, &body); err != nil {
-		panic(err)
+		log.Println(err)
+		return
 	}
 	body = body["body"].(map[string]any)
 
@@ -396,8 +401,10 @@ func parseCityDay(cinema cinema, date string, moviesCh chan map[string][]showing
 		eventMap := event.(map[string]any)
 		id := eventMap["filmId"].(string)
 		title := idToTitle[id]
+
 		dateTimeStr := eventMap["eventDateTime"].(string)
 		dateTime := processDateTimeString(dateTimeStr, cinema)
+
 		showin := showing{cinema, dateTime}
 		if showings, ok := movies["title"]; ok {
 			movies[title] = append(showings, showin)
@@ -415,77 +422,48 @@ func scrapeCinema(site site, resultCh chan result) {
 
 	c := colly.NewCollector(
 		colly.MaxDepth(2),
-		colly.DetectCharset(),
+		colly.Async(true),
 	)
-	// c.RedirectHandler = redirect
 
 	c.OnRequest(func(r *colly.Request) {
 		if config.charSet != "" {
 			r.ResponseCharacterEncoding = config.charSet
 		}
-		fmt.Println("Site: ", r.URL.String())
+		// fmt.Println("Site: ", r.URL.String())
 	})
 
 	movies := make(map[string][]showing)
-	var moviesMx sync.Mutex
-
-	if cinema == Kijow {
-		c.OnResponse(func(r *colly.Response) {
-			file, fileErr := os.Create("file.txt")
-			if fileErr != nil {
-				fmt.Println(fileErr)
-				return
-			}
-			fmt.Fprintf(file, "%v\n", r.Headers)
-			fmt.Fprintf(file, "%v\n", string(r.Body))
-		})
-	}
 
 	var lastDate string
 	c.OnHTML(config.rootSel, func(e *colly.HTMLElement) {
 		title := getTitle(cinema, e)
-		// if cinema == Kijow {
-		// 	fmt.Println(title)
-		// }
 		if title == "" {
 			return
 		}
 
-		// if groupDate != "" {
-		// 	fmt.Println(groupDate)
-		// }
 		// proper error handling
-		dateTimes := getDateTimes(cinema, e, &lastDate)
-		// dateTimes := getDateTimes(cinema, e, groupDate)
-		// if cinema == Kijow {
-		// 	fmt.Println(dateTimes)
+		dateTime := getDateTime(cinema, e, &lastDate)
+		// if len(dateTimes) == 0 {
+		// 	return
 		// }
-		if len(dateTimes) == 0 {
-			return
-		}
-
-		moviesMx.Lock()
-		defer moviesMx.Unlock()
-		for _, dateTime := range dateTimes {
-			// skip over showings from earlier in the day
-			if dateTime.Before(time.Now().Local()) {
-				continue
-			}
-
+		if !dateTime.Before(time.Now().Local()) {
 			movies[title] = append(movies[title], showing{cinema, dateTime})
 		}
+
+		// for _, dateTime := range dateTimes {
+		// 	// skip over showings from earlier in the day
+		// 	if dateTime.Before(time.Now().Local()) {
+		// 		continue
+		// 	}
+
+		// 	movies[title] = append(movies[title], showing{cinema, dateTime})
+		// }
 	})
 
 	if config.linkSel != "" {
-		visited := map[string]struct{}{}
 		c.OnHTML(config.linkSel, func(e *colly.HTMLElement) {
-			linkText := e.DOM.Text()
-			if _, present := visited[linkText]; !present {
-				err := visitNext(cinema, e)
-				if err == nil {
-					visited[linkText] = struct{}{}
-				}
-			}
+			link := getNextUrl(cinema, e)
+			c.Visit(link)
 		})
 	}
 
@@ -501,11 +479,6 @@ func processDateTimeString(rawDateTime string, cinema cinema) time.Time {
 		func(r rune) bool {
 			return slices.Contains([]rune{' ', '\n', '\t', 'T', '-', '.', '/', '_', '\'', ','}, r)
 		})
-
-	// if cinema == PodBaranami {
-	// 	fmt.Println(dateTimeWords)
-	// 	fmt.Println([]int{1, 2})
-	// }
 
 	var (
 		day, year, hour, minute int
@@ -533,6 +506,7 @@ func processDateTimeString(rawDateTime string, cinema cinema) time.Time {
 
 	if year == 0 {
 		year = time.Now().Year()
+		// just assume next year, if it's an earlier month
 		if month < time.Now().Month() {
 			year++
 		}
@@ -540,7 +514,7 @@ func processDateTimeString(rawDateTime string, cinema cinema) time.Time {
 
 	location := time.Now().Location()
 
-	return time.Date(year, time.Month(month), day, hour, minute, 0, 0, location)
+	return time.Date(year, month, day, hour, minute, 0, 0, location)
 }
 
 func mapMonth(monthStr string) time.Month {
@@ -578,6 +552,7 @@ func mapMonth(monthStr string) time.Month {
 
 func getTitle(cinema cinema, e *colly.HTMLElement) string {
 	var title string
+
 	switch cinema {
 	case Kika, Agrafka:
 		title = e.DOM.Find("a").First().Text()
@@ -587,11 +562,11 @@ func getTitle(cinema cinema, e *colly.HTMLElement) string {
 
 	case PodBaranami:
 		title = e.DOM.Find("a").First().Text()
+		// lots of newlines and garbage around it
 		title = strings.TrimSpace(title)
 
 	case Paradox:
 		title = e.DOM.Find("a.item-title").Text()
-		// fmt.Println(title)
 
 	case Sfinks:
 		title = e.DOM.Find("span.title").Text()
@@ -603,45 +578,41 @@ func getTitle(cinema cinema, e *colly.HTMLElement) string {
 	return title
 }
 
-func getDateTimes(cinema cinema, e *colly.HTMLElement, lastDate *string) []time.Time {
-	var dateTimeStrs = []string{}
+func getDateTime(cinema cinema, e *colly.HTMLElement, lastDate *string) time.Time {
+	var dateTimeStr string
+
 	switch cinema {
 	case Kika, Agrafka:
 		dateRaw := e.DOM.Find("div.date").Text()
 		dateLines := strings.Split(dateRaw, "\n")
 		dateLines = dateLines[len(dateLines)-2:]
-		dateRaw = strings.Join(dateLines, "")
-		dateTimeStrs = append(dateTimeStrs, dateRaw)
+		dateTimeStr = strings.Join(dateLines, "")
 
 	case Kijow:
-		dateRaw := e.DOM.Find("span.cd-date").Text()
-		dateTimeStrs = append(dateTimeStrs, dateRaw)
+		dateTimeStr = e.DOM.Find("span.cd-date").Text()
 
 	case PodBaranami:
 		timeRaw := e.DOM.Find("span").Find("a").Text()
 		onclickStr, found := e.DOM.Find("span").Find("a").Attr("onclick")
+		// times without URLs can just be skipped over
 		if !found {
-			return []time.Time{}
+			return time.Time{}
 		}
+
 		onClickWords := strings.Split(onclickStr, ",")
 		dateRaw := onClickWords[len(onClickWords)-5]
-		dateRaw = dateRaw + " " + timeRaw
-		dateTimeStrs = append(dateTimeStrs, dateRaw)
+		dateTimeStr = dateRaw + " " + timeRaw
 
 	case Paradox:
 		dateRaw, _ := e.DOM.Attr("data-date")
 		timeRaw := e.DOM.Find("div.item-time").Text()
-		dateRaw = dateRaw + " " + timeRaw
-		// fmt.Println(dateRaw)
-		dateTimeStrs = append(dateTimeStrs, dateRaw)
+		dateTimeStr = dateRaw + " " + timeRaw
 
 	case Sfinks:
-		fmt.Println(lastDate)
 		dateTimeElement := e.DOM.Find("span.kali_data_od")
 		dateRaw := dateTimeElement.Find("span").First().Text()
 		timeRaw := dateTimeElement.Find("span").Eq(2).Text()
-		dateRaw = dateRaw + " " + timeRaw
-		dateTimeStrs = append(dateTimeStrs, dateRaw)
+		dateTimeStr = dateRaw + " " + timeRaw
 
 	case Mikro:
 		dateElementMaybe := e.DOM.Find("div.repertoire-separator")
@@ -650,34 +621,19 @@ func getDateTimes(cinema cinema, e *colly.HTMLElement, lastDate *string) []time.
 		}
 		dateRaw := *lastDate
 		timeRaw := e.DOM.Find("p.repertoire-item-hour").Text()
-		dateRaw = dateRaw + " " + timeRaw
-		dateTimeStrs = append(dateTimeStrs, dateRaw)
+		dateTimeStr = dateRaw + " " + timeRaw
 	}
 
-	var dateTimes = make([]time.Time, len(dateTimeStrs))
-	for i, e := range dateTimeStrs {
-		dateTimes[i] = processDateTimeString(e, cinema)
-	}
-	return dateTimes
+	return processDateTimeString(dateTimeStr, cinema)
 }
 
-func visitNext(cinema cinema, e *colly.HTMLElement) error {
-	var err error
-	switch cinema {
-	case Kijow:
-		month := e.DOM.Find("span.daynumber:not(.active)").Text()
-		if month != "" {
-			link := e.Attr("href")
-			// fmt.Println(link)
-			err = e.Request.Visit(link)
-			// fmt.Println(a)
-		}
+func getNextUrl(cinema cinema, e *colly.HTMLElement) string {
+	var link string
 
-	case Sfinks:
-		link := e.Attr("href")
-		// fmt.Println(link)
-		err = e.Request.Visit(link)
-		// fmt.Println(a)
+	switch cinema {
+	case Kijow, Sfinks:
+		link = e.Request.AbsoluteURL(e.Attr("href"))
 	}
-	return err
+
+	return link
 }
