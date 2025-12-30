@@ -1,13 +1,15 @@
 package main
 
 import (
+	"database/sql"
 	"encoding/json"
+	"flag"
 	"fmt"
 	"io"
 	"log"
 	"net/http"
 	"net/http/cookiejar"
-	"os"
+	"net/url"
 	"regexp"
 	"slices"
 	"sort"
@@ -18,10 +20,12 @@ import (
 	"github.com/gocolly/colly"
 	"golang.org/x/text/collate"
 	"golang.org/x/text/language"
+	_ "modernc.org/sqlite"
 )
 
 //go:generate stringer -type=cinema
 type cinema int
+
 const (
 	Agrafka cinema = iota
 	CCityBonarka
@@ -56,8 +60,8 @@ type site struct {
 
 type result struct {
 	cinema cinema
-	// TODO map of string to time
 	movies map[string][]showing
+	// titleToTime map[string][]time.Time
 }
 
 var repertoires = map[cinema]string{
@@ -78,7 +82,7 @@ var cinemaApiIds = map[cinema]string{
 }
 
 var apiUrls = map[string]string{
-	"MultikinoJWT":        "https://multikino.pl/api/microservice",
+	"MultikinoCookies":    "https://multikino.pl/api/microservice",
 	"MultikinoFilmsStart": "https://multikino.pl/api/microservice/showings/cinemas/",
 	"MultikinoFilmsEnd":   "/films/",
 	"CCityDatesStart":     "https://cinema-city.pl/pl/data-api-service/v1/quickbook/10103/dates/in-cinema/",
@@ -87,16 +91,41 @@ var apiUrls = map[string]string{
 	"CCityFilmsEnd":       "/at-date/",
 }
 
-var excludedByKeywords = [...]string{"UKRAINIAN", "UKRAIŃSKI", "DLA OSÓB", "KLUB SENIORA"}
+var excludedByKeywords = [...]string{"UKRAINIAN", "UKRAIŃSKI", "DLA OSÓB", "KLUB SENIORA", "DKF KROPKA DLA DZIECI"}
 
+// TODO properly remove punctuation?
 var removedKeywords = [...]string{"2D", "3D", "- DUBBING", "DUBBING", " - NAPISY", "NAPISY",
-	"TANI WTOREK:", "DKF KROPKA:", "DKF PEŁNA SALA:", "DKF KROPKA DLA DZIECI:",
+	"TANI WTOREK:", "DKF KROPKA:", "DKF PEŁNA SALA:",
 	"- PRZEDPREMIERA", "+ ENG SUB", "- POKAZ SPECJALNY Z DYSKUSJĄ", "– WERSJA REŻYSERSKA",
-	"- POKAZ SPECJALNY", "POKAZ SPECJALNY"}
+	". WERSJA REŻYSERSKA", "- POKAZ SPECJALNY", "POKAZ SPECJALNY"}
 
 var timeRegex = regexp.MustCompile("^(([0-1]?[0-9])|(2[0-3]))(:[0-5][0-9])+$")
 
 func main() {
+	originFlagPtr := flag.String("origin", "", "The gotify origin \"scheme://authority\".")
+	tokenFlagPtr := flag.String("token", "", "The Gotify token.")
+	logFlagPtr := flag.Bool("log", false, "Determines if the result should be logged.")
+	flag.Parse()
+
+	db, err := sql.Open("sqlite", "./movies.db")
+	if err != nil {
+		panic(err)
+	}
+	defer db.Close()
+
+	sqlCreate := `
+	CREATE TABLE IF NOT EXISTS movies (
+		title TEXT NOT NULL PRIMARY KEY,
+		original_title TEXT,
+		first_showing TEXT NOT NULL,
+		latest_showing TEXT NOT NULL
+	);
+	`
+	_, err = db.Exec(sqlCreate)
+	if err != nil {
+		panic(err)
+	}
+
 	cinemasToScrape := [...]site{
 		{Agrafka,
 			siteConfig{
@@ -127,27 +156,25 @@ func main() {
 	cinemasToFetch := [...]site{
 		{Multikino,
 			siteConfig{
-				processFun: parseMultikino}},
+				processFun: fetchMultikino}},
 		{CCityBonarka,
 			siteConfig{
-				processFun: parseCCity}},
+				processFun: fetchCCity}},
 		{CCityKazimierz,
 			siteConfig{
-				processFun: parseCCity}},
+				processFun: fetchCCity}},
 		{CCityZakopianka,
 			siteConfig{
-				processFun: parseCCity}},
+				processFun: fetchCCity}},
 	}
 
 	answerCountdown := len(cinemasToScrape) + len(cinemasToFetch)
 	resultCh := make(chan result)
 
 	for _, cinema := range cinemasToScrape {
-		// timeouts
 		go scrapeCinema(cinema, resultCh)
 	}
 	for _, cinema := range cinemasToFetch {
-		// timeouts
 		go cinema.config.processFun(cinema.cinema, resultCh)
 	}
 
@@ -217,36 +244,123 @@ WaitForCinemas:
 		})
 	}
 
-	collator := collate.New(language.Polish)
-	collator.SortStrings(titles)
-
-	for _, title := range titles {
-		fmt.Printf("|%s|\n", title)
-		for _, showing := range movies[title] {
-			fmt.Printf("%s: %s, ", showing.cinema.String(), showing.time)
+	moviesToday := map[string][]showing{}
+	moviesYesterday := map[string][]showing{}
+	moviesLastWeek := map[string][]showing{}
+	moviesRest := map[string][]showing{}
+	for title, showings := range movies {
+		sqlSelect := `
+		SELECT latest_showing
+		 FROM movies
+		 WHERE title = ?;
+		`
+		rows, err := db.Query(sqlSelect, title)
+		if err != nil {
+			panic(err)
 		}
-		fmt.Print("\n\n")
+
+		today := time.Now()
+		todayStr :=
+			fmt.Sprintf("%d-%02d-%02d",
+				today.Year(), today.Month(), today.Day())
+		if !rows.Next() {
+			moviesToday[title] = showings
+
+			sqlInsert := `
+			INSERT INTO movies
+			 (title, original_title, first_showing, latest_showing)
+			 VALUES(?, ?, ?, ?)
+			`
+			_, err = db.Exec(sqlInsert, title, "", todayStr, todayStr)
+			if err != nil {
+				panic(err)
+			}
+		} else {
+			var latestShowingStr string
+			err := rows.Scan(&latestShowingStr)
+			if err != nil {
+				panic(err)
+			}
+			rows.Close()
+
+			latestShowing, _ := time.Parse(time.DateOnly, latestShowingStr)
+			today, _ := time.Parse(time.DateOnly, todayStr)
+			hourDiff := today.Sub(latestShowing).Hours()
+
+			if hourDiff <= 50 {
+				moviesYesterday[title] = showings
+			} else if hourDiff <= 170 {
+				moviesLastWeek[title] = showings
+			} else {
+				moviesRest[title] = showings
+			}
+
+			sqlUpdate := `
+			UPDATE movies
+			 SET latest_showing = ?
+			 WHERE title = ?
+			`
+			_, err = db.Exec(sqlUpdate, todayStr, title)
+			if err != nil {
+				panic(err)
+			}
+		}
 	}
 
-	fmt.Printf("TOTAL: %d \n", len(titles))
+	var sb strings.Builder
 
-	fmt.Println("RESULTS NOT RECEIVED FROM:")
-	for cinemaIndex, received := range receivedArr {
-		if !received {
-			fmt.Println(cinema(cinemaIndex))
+	if len(moviesToday) > 0 {
+		sb.WriteString("||TODAY||\n")
+		writeMovies(&sb, moviesToday)
+	}
+
+	if len(moviesYesterday) > 0 {
+		sb.WriteString("||YESTERDAY||\n")
+		writeMovies(&sb, moviesYesterday)
+	}
+
+	if len(moviesLastWeek) > 0 {
+		sb.WriteString("||LAST WEEK||\n")
+		writeMovies(&sb, moviesLastWeek)
+	}
+
+	if len(moviesRest) > 0 {
+		sb.WriteString("||ALL OTHERS||\n")
+		writeMovies(&sb, moviesRest)
+	}
+
+	totalLine := fmt.Sprintf("TOTAL: %d \n", len(titles))
+	sb.WriteString(totalLine)
+
+	if slices.Contains(receivedArr[:], false) {
+		sb.WriteString("RESULTS NOT RECEIVED FROM:\n")
+		for cinemaIndex, received := range receivedArr {
+			if !received {
+				cinemaLine := fmt.Sprintf("%s\n", cinema(cinemaIndex))
+				sb.WriteString(cinemaLine)
+			}
 		}
 	}
 
-	now := time.Now()
-	filepath := fmt.Sprintf("titles/%d-%d-%d.txt", now.Year(), now.Month(), now.Day())
-	f, _ := os.Create(filepath)
-	defer f.Close()
-	for _, title := range titles {
-		f.WriteString(title + "\n")
+	if *originFlagPtr != "" && *tokenFlagPtr != "" {
+		uv := url.Values{}
+		today := time.Now()
+		todayStr :=
+			fmt.Sprintf("%02d/%02d/%d\n",
+				today.Day(), today.Month(), today.Year())
+		uv.Set("title", todayStr)
+		uv.Add("message", sb.String())
+
+		gotifyUrl := fmt.Sprintf("%s/message?token=%s", *originFlagPtr, *tokenFlagPtr)
+		http.PostForm(gotifyUrl, uv)
+	}
+
+	if *logFlagPtr {
+		fmt.Println(sb.String())
 	}
 }
 
-func parseMultikino(cinema cinema, resultCh chan result) {
+func fetchMultikino(cinema cinema, resultCh chan result) {
 	client := &http.Client{}
 
 	jar, err := cookiejar.New(nil)
@@ -255,8 +369,8 @@ func parseMultikino(cinema cinema, resultCh chan result) {
 	}
 	client.Jar = jar
 
-	// Obtain JWTs
-	req, _ := http.NewRequest("GET", apiUrls["MultikinoJWT"], nil)
+	// Obtain cookies
+	req, _ := http.NewRequest("GET", apiUrls["MultikinoCookies"], nil)
 	res, err := client.Do(req)
 	if err != nil {
 		log.Println(err)
@@ -306,7 +420,7 @@ func parseMultikino(cinema cinema, resultCh chan result) {
 	resultCh <- result{cinema: Multikino, movies: movies}
 }
 
-func parseCCity(cinema cinema, resultCh chan result) {
+func fetchCCity(cinema cinema, resultCh chan result) {
 	client := &http.Client{}
 
 	datesBasePath := apiUrls["CCityDatesStart"] + cinemaApiIds[cinema] + apiUrls["CCityDatesEnd"]
@@ -339,12 +453,13 @@ func parseCCity(cinema cinema, resultCh chan result) {
 
 	moviesCh := make(chan map[string][]showing)
 	for _, date := range dates {
-		go parseCCityDay(cinema, date, moviesCh)
+		go fetchCCityDay(cinema, date, moviesCh)
 	}
 
 	movies := make(map[string][]showing)
 	answerCountdown := len(dates)
 
+	// unnecessary
 WaitForCCityDay:
 	for answerCountdown > 0 {
 		var dayMovies map[string][]showing
@@ -368,7 +483,7 @@ WaitForCCityDay:
 	resultCh <- result{cinema: cinema, movies: movies}
 }
 
-func parseCCityDay(cinema cinema, date string, moviesCh chan map[string][]showing) {
+func fetchCCityDay(cinema cinema, date string, moviesCh chan map[string][]showing) {
 	client := &http.Client{}
 	moviesBasePath := apiUrls["CCityFilmsStart"] + cinemaApiIds[cinema] + apiUrls["CCityFilmsEnd"]
 	req, _ := http.NewRequest("GET", moviesBasePath+date, nil)
@@ -429,7 +544,6 @@ func scrapeCinema(site site, resultCh chan result) {
 		if config.charSet != "" {
 			r.ResponseCharacterEncoding = config.charSet
 		}
-		// fmt.Println("Site: ", r.URL.String())
 	})
 
 	movies := make(map[string][]showing)
@@ -441,23 +555,12 @@ func scrapeCinema(site site, resultCh chan result) {
 			return
 		}
 
-		// proper error handling
+		// TODO proper error handling
 		dateTime := getDateTime(cinema, e, &lastDate)
-		// if len(dateTimes) == 0 {
-		// 	return
-		// }
+
 		if !dateTime.Before(time.Now().Local()) {
 			movies[title] = append(movies[title], showing{cinema, dateTime})
 		}
-
-		// for _, dateTime := range dateTimes {
-		// 	// skip over showings from earlier in the day
-		// 	if dateTime.Before(time.Now().Local()) {
-		// 		continue
-		// 	}
-
-		// 	movies[title] = append(movies[title], showing{cinema, dateTime})
-		// }
 	})
 
 	if config.linkSel != "" {
@@ -636,4 +739,45 @@ func getNextUrl(cinema cinema, e *colly.HTMLElement) string {
 	}
 
 	return link
+}
+
+func writeMovies(sb *strings.Builder, movies map[string][]showing) {
+	titles := make([]string, len(movies))
+	i := 0
+	for title := range movies {
+		titles[i] = title
+		i++
+	}
+	collator := collate.New(language.Polish)
+	collator.SortStrings(titles)
+
+	var lastDate time.Time
+	for _, title := range titles {
+		titleLine := fmt.Sprintf("|%s|\n", title)
+		sb.WriteString(titleLine)
+
+		lastDate = time.Time{}
+		for _, showing := range movies[title] {
+			dateTime := showing.time
+			date :=
+				time.Date(dateTime.Year(), dateTime.Month(), dateTime.Day(),
+					0, 0, 0, 0,
+					dateTime.Location())
+
+			if !lastDate.Equal(date) {
+				dateLine :=
+					fmt.Sprintf("======%02d/%02d/%d======\n",
+						dateTime.Day(), dateTime.Month(), dateTime.Year())
+				sb.WriteString(dateLine)
+				lastDate = date
+			}
+
+			showingLine :=
+				fmt.Sprintf("%s  %02d:%02d\n",
+					showing.cinema.String(), dateTime.Hour(), dateTime.Minute())
+			sb.WriteString(showingLine)
+		}
+
+		sb.WriteString("\n")
+	}
 }
