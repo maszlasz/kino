@@ -3,7 +3,7 @@ This project generates a summary of all available repertoires from all cinemas i
 The summary can be stored as a textfile, if provided with flag `-log`, or sent as a notification via gotify, if provided with options `-origin` (address of the gotify server) and `-token` (gotify app token).
 So e.g:
 
-`main -log -origin="http://localhost:80" -token="VXfxf84GDD.MXX"`
+`kino -log -origin="http://localhost:80" -token="VXfxf84GDD.MXX"`
 
 I personally have it automated and ran periodically, with the notifications sent to the gotify app on my phone.
 
