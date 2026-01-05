@@ -25,9 +25,9 @@ var removedKeywords = [...]string{"2D", "3D", "- DUBBING", "DUBBING", " - NAPISY
 	". WERSJA REŻYSERSKA", "- POKAZ SPECJALNY", "POKAZ SPECJALNY"}
 
 func main() {
-	originFlagPtr := flag.String("origin", "", "The gotify origin \"scheme://authority\".")
+	originFlagPtr := flag.String("origin", "", "The Gotify origin \"scheme://authority\".")
 	tokenFlagPtr := flag.String("token", "", "The Gotify token.")
-	logFlagPtr := flag.Bool("log", false, "Determines if the result should be logged.")
+	logFlagPtr := flag.Bool("log", false, "Determines if the result should be logged as a markdown file.")
 	flag.Parse()
 
 	db, err := sql.Open("sqlite", "./movies.db")
@@ -40,8 +40,8 @@ func main() {
 	CREATE TABLE IF NOT EXISTS movies (
 		title TEXT NOT NULL PRIMARY KEY,
 		original_title TEXT,
-		first_showing TEXT NOT NULL,
-		latest_showing TEXT NOT NULL
+		first_seen TEXT NOT NULL,
+		last_seen TEXT NOT NULL
 	);
 	`
 	_, err = db.Exec(sqlCreate)
@@ -127,9 +127,9 @@ WaitForCinemas:
 	moviesRest := map[string][]showing{}
 	for title, showings := range movies {
 		sqlSelect := `
-		SELECT latest_showing
-		 FROM movies
-		 WHERE title = ?;
+			SELECT first_seen, last_seen
+				FROM movies
+				WHERE title = ?;
 		`
 		rows, err := db.Query(sqlSelect, title)
 		if err != nil {
@@ -141,53 +141,74 @@ WaitForCinemas:
 			fmt.Sprintf("%d-%02d-%02d",
 				today.Year(), today.Month(), today.Day())
 
-		// no db entry -> add it and treat it as a new movie from today
 		if !rows.Next() {
+			// no db entry -> add it and treat it as a new movie from today
 			moviesToday[title] = showings
 
 			sqlInsert := `
-			INSERT INTO movies
-			 (title, original_title, first_showing, latest_showing)
-			 VALUES(?, ?, ?, ?)
+				INSERT INTO movies
+					(title, original_title, first_seen, last_seen)
+					VALUES(?, ?, ?, ?);
 			`
 			_, err = db.Exec(sqlInsert, title, "", todayStr, todayStr)
 			if err != nil {
 				panic(err)
 			}
 		} else {
-			var latestShowingStr string
-			err := rows.Scan(&latestShowingStr)
+			var firstSeenStr, lastSeenStr string
+			err := rows.Scan(&firstSeenStr, &lastSeenStr)
 			if err != nil {
 				panic(err)
 			}
 			rows.Close()
 
-			latestShowing, _ := time.Parse(time.DateOnly, latestShowingStr)
+			lastSeen, _ := time.Parse(time.DateOnly, lastSeenStr)
 			today, _ := time.Parse(time.DateOnly, todayStr)
-			hourDiff := today.Sub(latestShowing).Hours()
+			hourDiff := today.Sub(lastSeen).Hours()
 
-			if hourDiff <= 50 {
-				moviesYesterday[title] = showings
-			} else if hourDiff <= 170 {
-				moviesLastWeek[title] = showings
+			if hourDiff > 25 {
+				// haven't appeared in any repertoires in a while -> treat it as
+				// a 'new' movie from today
+				moviesToday[title] = showings
+
+				sqlUpdate := `
+					UPDATE movies
+						SET first_seen = ?, last_seen = ?
+						WHERE title = ?;
+				`
+				_, err = db.Exec(sqlUpdate, todayStr, title)
+				if err != nil {
+					panic(err)
+				}
 			} else {
-				moviesRest[title] = showings
-			}
+				// otherwise determine how long has it been since
+				// it's been added to the currect repertoire aggregate
+				firstSeen, _ := time.Parse(time.DateOnly, firstSeenStr)
+				hourDiff = today.Sub(firstSeen).Hours()
 
-			sqlUpdate := `
-			UPDATE movies
-			 SET latest_showing = ?
-			 WHERE title = ?
-			`
-			_, err = db.Exec(sqlUpdate, todayStr, title)
-			if err != nil {
-				panic(err)
+				if hourDiff <= 50 {
+					moviesYesterday[title] = showings
+				} else if hourDiff <= 170 {
+					moviesLastWeek[title] = showings
+				} else {
+					moviesRest[title] = showings
+				}
+
+				sqlUpdate := `
+					UPDATE movies
+						SET last_seen = ?
+						WHERE title = ?;
+				`
+				_, err = db.Exec(sqlUpdate, todayStr, title)
+				if err != nil {
+					panic(err)
+				}
 			}
 		}
 	}
 
 	var sb strings.Builder
-
+	// gotify android app markdown renderer needs '\n' for a newline it seems
 	if len(moviesToday) > 0 {
 		sb.WriteString(`# **TODAY**  \n`)
 		writeMovies(&sb, moviesToday)
@@ -199,12 +220,12 @@ WaitForCinemas:
 	}
 
 	if len(moviesLastWeek) > 0 {
-		sb.WriteString("# **LAST WEEK**  \n")
+		sb.WriteString(`# **LAST WEEK**  \n`)
 		writeMovies(&sb, moviesLastWeek)
 	}
 
 	if len(moviesRest) > 0 {
-		sb.WriteString("# **THE REST**  \n")
+		sb.WriteString(`# **THE REST**  \n`)
 		writeMovies(&sb, moviesRest)
 	}
 
@@ -251,13 +272,14 @@ WaitForCinemas:
 			fmt.Sprintf("%d-%02d-%02d",
 				today.Year(), today.Month(), today.Day())
 
-		filepath := fmt.Sprintf("%s.log", todayStr)
+		filepath := fmt.Sprintf("%s.md", todayStr)
 		file, err := os.Create(filepath)
 		if err != nil {
 			panic(err)
 		}
 		defer file.Close()
 
+		summary = strings.ReplaceAll(summary, `\n`, `<br>`)
 		file.WriteString(summary)
 	}
 }
