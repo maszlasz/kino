@@ -5,7 +5,6 @@ import (
 	"flag"
 	"fmt"
 	"net/http"
-	"net/url"
 	"os"
 	"slices"
 	"sort"
@@ -142,6 +141,7 @@ WaitForCinemas:
 			fmt.Sprintf("%d-%02d-%02d",
 				today.Year(), today.Month(), today.Day())
 
+		// no db entry -> add it and treat it as a new movie from today
 		if !rows.Next() {
 			moviesToday[title] = showings
 
@@ -189,33 +189,33 @@ WaitForCinemas:
 	var sb strings.Builder
 
 	if len(moviesToday) > 0 {
-		sb.WriteString("||TODAY||\n")
+		sb.WriteString(`# **TODAY**  \n`)
 		writeMovies(&sb, moviesToday)
 	}
 
 	if len(moviesYesterday) > 0 {
-		sb.WriteString("||YESTERDAY||\n")
+		sb.WriteString(`# **YESTERDAY**  \n`)
 		writeMovies(&sb, moviesYesterday)
 	}
 
 	if len(moviesLastWeek) > 0 {
-		sb.WriteString("||LAST WEEK||\n")
+		sb.WriteString("# **LAST WEEK**  \n")
 		writeMovies(&sb, moviesLastWeek)
 	}
 
 	if len(moviesRest) > 0 {
-		sb.WriteString("||ALL OTHERS||\n")
+		sb.WriteString("# **THE REST**  \n")
 		writeMovies(&sb, moviesRest)
 	}
 
-	totalLine := fmt.Sprintf("TOTAL: %d \n", len(movies))
+	totalLine := fmt.Sprintf(`**TOTAL: %d**  \n`, len(movies))
 	sb.WriteString(totalLine)
 
 	if slices.Contains(receivedArr[:], false) {
-		sb.WriteString("RESULTS NOT RECEIVED FROM:\n")
+		sb.WriteString(`RESULTS NOT RECEIVED FROM:  \n`)
 		for cinemaIndex, received := range receivedArr {
 			if !received {
-				cinemaLine := fmt.Sprintf("%s\n", cinema(cinemaIndex))
+				cinemaLine := fmt.Sprintf(`%s  \n`, cinema(cinemaIndex))
 				sb.WriteString(cinemaLine)
 			}
 		}
@@ -223,18 +223,26 @@ WaitForCinemas:
 
 	summary := sb.String()
 
-	// POST to gotify?
 	if *originFlagPtr != "" && *tokenFlagPtr != "" {
-		uv := url.Values{}
 		today := time.Now()
 		todayStr :=
-			fmt.Sprintf("%02d/%02d/%d\n",
+			fmt.Sprintf("%02d/%02d/%d",
 				today.Day(), today.Month(), today.Year())
-		uv.Set("title", todayStr)
-		uv.Add("message", summary)
+
+		reqBodyStr := fmt.Sprintf(`{
+			"title": "%s",
+			"message": "%s",
+			"extras": {
+				"client::display": {
+					"contentType": "text/markdown"
+				}
+			}
+		}`, todayStr, summary)
+		reqBody := strings.NewReader(reqBodyStr)
 
 		gotifyUrl := fmt.Sprintf("%s/message?token=%s", *originFlagPtr, *tokenFlagPtr)
-		http.PostForm(gotifyUrl, uv)
+
+		http.Post(gotifyUrl, "application/json", reqBody)
 	}
 
 	if *logFlagPtr {
@@ -266,7 +274,7 @@ func writeMovies(sb *strings.Builder, movies map[string][]showing) {
 
 	var lastDate time.Time
 	for _, title := range titles {
-		titleLine := fmt.Sprintf("|%s|\n", title)
+		titleLine := fmt.Sprintf(`## %s`, title)
 		sb.WriteString(titleLine)
 
 		lastDate = time.Time{}
@@ -279,18 +287,18 @@ func writeMovies(sb *strings.Builder, movies map[string][]showing) {
 
 			if !lastDate.Equal(date) {
 				dateLine :=
-					fmt.Sprintf("======%02d/%02d/%d======\n",
+					fmt.Sprintf(`  \n======**%02d/%02d/%d**======  \n`,
 						dateTime.Day(), dateTime.Month(), dateTime.Year())
 				sb.WriteString(dateLine)
 				lastDate = date
 			}
 
 			showingLine :=
-				fmt.Sprintf("%s  %02d:%02d\n",
+				fmt.Sprintf(`%s  %02d:%02d  \n`,
 					showing.cinema.String(), dateTime.Hour(), dateTime.Minute())
 			sb.WriteString(showingLine)
 		}
 
-		sb.WriteString("\n")
+		sb.WriteString(`  \n`)
 	}
 }
