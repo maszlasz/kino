@@ -5,7 +5,8 @@ So e.g:
 
 `kino -log -origin="http://localhost:80" -token="VXfxf84GDD.MXX"`
 
-I personally have it automated and ran periodically, with the notifications sent to the gotify app on my phone.
+Preferrably it should be ran once a day so that it can accurately determined when each movie has been added to the repertoires.
+Personally I have it automated, with the notifications sent to the gotify app on my phone.
 
 The repertoires are obtained either via web scraping, for the following cinemas:
 - Agrafka
