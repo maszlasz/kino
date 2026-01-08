@@ -176,7 +176,7 @@ WaitForCinemas:
 						SET first_seen = ?, last_seen = ?
 						WHERE title = ?;
 				`
-				_, err = db.Exec(sqlUpdate, todayStr, title)
+				_, err = db.Exec(sqlUpdate, todayStr, todayStr, title)
 				if err != nil {
 					panic(err)
 				}
