@@ -296,6 +296,7 @@ func writeMovies(sb *strings.Builder, movies map[string][]showing) {
 
 	var lastDate time.Time
 	for _, title := range titles {
+		title = strings.Replace(title, "\"", "\\\"", -1)
 		titleLine := fmt.Sprintf(`## %s`, title)
 		sb.WriteString(titleLine)
 
@@ -316,8 +317,11 @@ func writeMovies(sb *strings.Builder, movies map[string][]showing) {
 			}
 
 			showingLine :=
-				fmt.Sprintf(`%s  %02d:%02d  \n`,
-					showing.cinema.String(), dateTime.Hour(), dateTime.Minute())
+				fmt.Sprintf(`[%s](%s)  %02d:%02d  \n`,
+					showing.cinema.String(),
+					websites[showing.cinema],
+					dateTime.Hour(),
+					dateTime.Minute())
 			sb.WriteString(showingLine)
 		}
 

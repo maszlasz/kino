@@ -38,6 +38,20 @@ type result struct {
 
 var timeRegex = regexp.MustCompile("^(([0-1]?[0-9])|(2[0-3]))(:[0-5][0-9])+$")
 
+var websites = map[cinema]string{
+	Agrafka:         "https://bilety.kinoagrafka.pl",
+	CCityBonarka:    "https://www.cinema-city.pl/kina/bonarka/1090#/buy-tickets-by-cinema?in-cinema=1090",
+	CCityKazimierz:  "https://www.cinema-city.pl/kina/kazimierz/1076#/buy-tickets-by-cinema?in-cinema=1076",
+	CCityZakopianka: "https://www.cinema-city.pl/kina/zakopianka/1064#/buy-tickets-by-cinema?in-cinema=1064",
+	Kijow:           "https://kupbilet.kijow.pl/MSI/mvc/pl?sort=Flow",
+	Kika:            "https://bilety.kinokika.pl",
+	Mikro:           "https://kinomikro.pl/repertoire/?view=all",
+	Multikino:       "https://www.multikino.pl/repertuar/krakow/teraz-gramy",
+	PodBaranami:     "https://www.kinopodbaranami.pl/repertuar.php",
+	Paradox:         "https://kinoparadox.pl/repertuar/",
+	Sfinks:          "https://kinosfinks.okn.edu.pl/wydarzenia-szukaj-strona-1.html",
+}
+
 func processDateTimeString(rawDateTime string, cinema cinema) time.Time {
 	dateTimeWords := strings.FieldsFunc(
 		rawDateTime,
