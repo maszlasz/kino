@@ -23,7 +23,8 @@ var cinemaApiIds = map[cinema]string{
 }
 
 var apiUrls = map[string]string{
-	"MultikinoCookies":    "https://multikino.pl/api/microservice",
+	"MultikinoBase":       "https://multikino.pl/",
+	"MultikinoCookies":    "https://multikino.pl/api/microservice/",
 	"MultikinoFilmsStart": "https://multikino.pl/api/microservice/showings/cinemas/",
 	"MultikinoFilmsEnd":   "/films/",
 	"CCityDatesStart":     "https://cinema-city.pl/pl/data-api-service/v1/quickbook/10103/dates/in-cinema/",
@@ -100,13 +101,14 @@ func fetchMultikino(cinema cinema, resultCh chan result) {
 				sessionJson := e.(map[string]any)
 				timeString := sessionJson["startTime"].(string)
 				time := processDateTimeString(timeString, cinema)
-				showings = append(showings, showing{cinema: Multikino, time: time})
+				url := apiUrls["MultikinoBase"] + sessionJson["bookingUrl"].(string)
+				showings = append(showings, showing{cinema, time, url})
 			}
 		}
 		movies[title] = showings
 	}
 
-	resultCh <- result{cinema: Multikino, movies: movies}
+	resultCh <- result{cinema: cinema, movies: movies}
 }
 
 func fetchCCity(cinema cinema, resultCh chan result) {
@@ -120,7 +122,6 @@ func fetchCCity(cinema cinema, resultCh chan result) {
 	req, _ := http.NewRequest("GET", datesTodayPath, nil)
 	res, err := client.Do(req)
 	if err != nil {
-		// TODO panics maybe?
 		log.Println(err)
 		return
 	}
@@ -175,7 +176,8 @@ WaitForCCityDay:
 func fetchCCityDay(cinema cinema, date string, moviesCh chan map[string][]showing) {
 	client := &http.Client{}
 	moviesBasePath := apiUrls["CCityFilmsStart"] + cinemaApiIds[cinema] + apiUrls["CCityFilmsEnd"]
-	req, _ := http.NewRequest("GET", moviesBasePath+date, nil)
+	moviesPath := moviesBasePath + date
+	req, _ := http.NewRequest("GET", moviesPath, nil)
 	res, err := client.Do(req)
 	if err != nil {
 		log.Println(err)
@@ -209,11 +211,13 @@ func fetchCCityDay(cinema cinema, date string, moviesCh chan map[string][]showin
 		dateTimeStr := eventMap["eventDateTime"].(string)
 		dateTime := processDateTimeString(dateTimeStr, cinema)
 
-		showin := showing{cinema, dateTime}
+		url := eventMap["bookingLink"].(string)
+
+		event := showing{cinema, dateTime, url}
 		if showings, ok := movies["title"]; ok {
-			movies[title] = append(showings, showin)
+			movies[title] = append(showings, event)
 		} else {
-			movies[title] = []showing{showin}
+			movies[title] = []showing{event}
 		}
 	}
 

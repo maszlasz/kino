@@ -317,11 +317,12 @@ func writeMovies(sb *strings.Builder, movies map[string][]showing) {
 			}
 
 			showingLine :=
-				fmt.Sprintf(`[%s](%s)  %02d:%02d  \n`,
+				fmt.Sprintf(`[%s](%s)  [%02d:%02d](%s)  \n`,
 					showing.cinema.String(),
 					websites[showing.cinema],
 					dateTime.Hour(),
-					dateTime.Minute())
+					dateTime.Minute(),
+					showing.url)
 			sb.WriteString(showingLine)
 		}
 

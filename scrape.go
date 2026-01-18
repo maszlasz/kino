@@ -8,28 +8,38 @@ import (
 )
 
 type scrapeSite struct {
-	cinema  cinema
-	rootSel string
-	linkSel string
-	charSet string
+	cinema      cinema
+	rootSel     string
+	nextPageSel string
+	charSet     string
 }
 
 var repertoires = map[cinema]string{
-	Agrafka:     "https://bilety.kinoagrafka.pl",
-	Kijow:       "https://kupbilet.kijow.pl/MSI/mvc/pl?sort=Date&date=1970-01&datestart=0",
-	Kika:        "https://bilety.kinokika.pl",
-	Mikro:       "https://kinomikro.pl/repertoire/?view=all",
+	Agrafka:     "https://bilety.kinoagrafka.pl/",
+	Kijow:       "https://kupbilet.kijow.pl/MSI/mvc/pl?sort=Date&date=1970-01&datestart=0/",
+	Kika:        "https://bilety.kinokika.pl/",
+	Mikro:       "https://kinomikro.pl/repertoire/?view=all/",
 	Paradox:     "https://kinoparadox.pl/repertuar/",
-	PodBaranami: "https://kinopodbaranami.pl/repertuar.php",
-	Sfinks:      "https://kinosfinks.okn.edu.pl/wydarzenia-szukaj-strona-1.html",
+	PodBaranami: "https://kinopodbaranami.pl/repertuar.php/",
+	Sfinks:      "https://kinosfinks.okn.edu.pl/wydarzenia-szukaj-strona-1.html", //can't have a slash at the end of the url for some reason
+}
+
+var ticketBases = map[cinema]string{
+	Agrafka:     "https://bilety.kinoagrafka.pl/",
+	Kijow:       "https://kupbilet.kijow.pl/",
+	Kika:        "https://bilety.kinokika.pl/",
+	Mikro:       "https://kinomikro.pl/",
+	Paradox:     "https://kinoparadox.pl/repertuar/",
+	PodBaranami: "https://www.kinopodbaranami.pl/",
+	Sfinks:      "https://kinosfinks.okn.edu.pl/",
 }
 
 var cinemasToScrape = [...]scrapeSite{
 	{cinema: Agrafka,
 		rootSel: "div.repertoire-once"},
 	{cinema: Kijow,
-		rootSel: "div.cd-timeline-block",
-		linkSel: "a[href].eventcard.col-6"},
+		rootSel:     "div.cd-timeline-block",
+		nextPageSel: "a[href].eventcard.col-6"},
 	{cinema: Kika,
 		rootSel: "div.repertoire-once"},
 	{cinema: Paradox,
@@ -40,8 +50,8 @@ var cinemasToScrape = [...]scrapeSite{
 		rootSel: "li[title]",
 		charSet: "iso-8859-2"},
 	{cinema: Sfinks,
-		rootSel: "span.zajawka",
-		linkSel: "a[href][title^='Strona']"},
+		rootSel:     "span.zajawka",
+		nextPageSel: "a[href][title^='Strona']"},
 }
 
 func scrape(resultCh chan result) {
@@ -75,14 +85,16 @@ func scrapeCinema(site scrapeSite, resultCh chan result) {
 
 		dateTime := getDateTime(cinema, e, &lastDate)
 
+		url := getShowingUrl(cinema, e)
+
 		if !dateTime.Before(time.Now().Local()) {
-			movies[title] = append(movies[title], showing{cinema, dateTime})
+			movies[title] = append(movies[title], showing{cinema, dateTime, url})
 		}
 	})
 
-	if site.linkSel != "" {
-		c.OnHTML(site.linkSel, func(e *colly.HTMLElement) {
-			link := getNextUrl(cinema, e)
+	if site.nextPageSel != "" {
+		c.OnHTML(site.nextPageSel, func(e *colly.HTMLElement) {
+			link := getNextNextPageUrl(cinema, e)
 			c.Visit(link)
 		})
 	}
@@ -97,25 +109,25 @@ func getTitle(cinema cinema, e *colly.HTMLElement) string {
 	var title string
 
 	switch cinema {
-	case Kika, Agrafka:
+	case Agrafka, Kika:
 		title = e.DOM.Find("a").First().Text()
 
 	case Kijow:
 		title = e.DOM.Find("h2").After("i").Text()
+
+	case Mikro:
+		title = e.DOM.Find("a.repertoire-item-title").Text()
+
+	case Paradox:
+		title = e.DOM.Find("a.item-title").Text()
 
 	case PodBaranami:
 		title = e.DOM.Find("a").First().Text()
 		// lots of newlines and garbage around it
 		title = strings.TrimSpace(title)
 
-	case Paradox:
-		title = e.DOM.Find("a.item-title").Text()
-
 	case Sfinks:
 		title = e.DOM.Find("span.title").Text()
-
-	case Mikro:
-		title = e.DOM.Find("a.repertoire-item-title").Text()
 	}
 
 	return title
@@ -125,7 +137,7 @@ func getDateTime(cinema cinema, e *colly.HTMLElement, lastDate *string) time.Tim
 	var dateTimeStr string
 
 	switch cinema {
-	case Kika, Agrafka:
+	case Agrafka, Kika:
 		dateRaw := e.DOM.Find("div.date").Text()
 		dateLines := strings.Split(dateRaw, "\n")
 		dateLines = dateLines[len(dateLines)-2:]
@@ -133,6 +145,20 @@ func getDateTime(cinema cinema, e *colly.HTMLElement, lastDate *string) time.Tim
 
 	case Kijow:
 		dateTimeStr = e.DOM.Find("span.cd-date").Text()
+
+	case Mikro:
+		dateElementMaybe := e.DOM.Find("div.repertoire-separator")
+		if dateElementMaybe.Length() != 0 {
+			*lastDate = dateElementMaybe.Text()
+		}
+		dateRaw := *lastDate
+		timeRaw := e.DOM.Find("p.repertoire-item-hour").Text()
+		dateTimeStr = dateRaw + " " + timeRaw
+
+	case Paradox:
+		dateRaw, _ := e.DOM.Attr("data-date")
+		timeRaw := e.DOM.Find("div.item-time").Text()
+		dateTimeStr = dateRaw + " " + timeRaw
 
 	case PodBaranami:
 		timeRaw := e.DOM.Find("span").Find("a").Text()
@@ -146,37 +172,75 @@ func getDateTime(cinema cinema, e *colly.HTMLElement, lastDate *string) time.Tim
 		dateRaw := onClickWords[len(onClickWords)-5]
 		dateTimeStr = dateRaw + " " + timeRaw
 
-	case Paradox:
-		dateRaw, _ := e.DOM.Attr("data-date")
-		timeRaw := e.DOM.Find("div.item-time").Text()
-		dateTimeStr = dateRaw + " " + timeRaw
-
 	case Sfinks:
 		dateTimeElement := e.DOM.Find("span.kali_data_od")
 		dateRaw := dateTimeElement.Find("span").First().Text()
 		timeRaw := dateTimeElement.Find("span").Eq(2).Text()
-		dateTimeStr = dateRaw + " " + timeRaw
-
-	case Mikro:
-		dateElementMaybe := e.DOM.Find("div.repertoire-separator")
-		if dateElementMaybe.Length() != 0 {
-			*lastDate = dateElementMaybe.Text()
-		}
-		dateRaw := *lastDate
-		timeRaw := e.DOM.Find("p.repertoire-item-hour").Text()
 		dateTimeStr = dateRaw + " " + timeRaw
 	}
 
 	return processDateTimeString(dateTimeStr, cinema)
 }
 
-func getNextUrl(cinema cinema, e *colly.HTMLElement) string {
-	var link string
+func getShowingUrl(cinema cinema, e *colly.HTMLElement) string {
+	var url string
+	var exists bool
+
+	switch cinema {
+	case Agrafka:
+		url, exists = e.DOM.Find("a.button").Attr("href")
+		if exists {
+			url = ticketBases[Agrafka] + url
+		}
+
+	case Kika:
+		url, exists = e.DOM.Find("a.button").Attr("href")
+		if exists {
+			url = ticketBases[Kika] + url
+		}
+
+	case Kijow:
+		url, exists = e.DOM.Find("a.btn-badge2").Attr("href")
+		if exists {
+			url = ticketBases[Kijow] + url
+		}
+
+	case Mikro:
+		url, exists = e.DOM.Find("a.repertoire-item-button").Attr("href")
+		if exists {
+			url = ticketBases[Mikro] + url
+		}
+
+	case Paradox:
+		url, exists = e.DOM.Find("a.btn").Attr("href")
+
+	case PodBaranami:
+		url, exists = e.DOM.Find("a[onclick]").Attr("href")
+		if exists {
+			url = ticketBases[PodBaranami] + url
+		}
+
+	case Sfinks:
+		url, exists = e.DOM.Find("a").Attr("href")
+		if exists {
+			url = ticketBases[Sfinks] + url
+		}
+	}
+
+	if !exists {
+		return ""
+	}
+
+	return url
+}
+
+func getNextNextPageUrl(cinema cinema, e *colly.HTMLElement) string {
+	var url string
 
 	switch cinema {
 	case Kijow, Sfinks:
-		link = e.Request.AbsoluteURL(e.Attr("href"))
+		url = e.Request.AbsoluteURL(e.Attr("href"))
 	}
 
-	return link
+	return url
 }

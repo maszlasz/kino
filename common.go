@@ -29,6 +29,7 @@ const (
 type showing struct {
 	cinema cinema
 	time   time.Time
+	url    string
 }
 
 type result struct {
