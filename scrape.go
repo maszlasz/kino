@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"strings"
 	"time"
 
@@ -25,13 +26,15 @@ var repertoires = map[cinema]string{
 }
 
 var ticketBases = map[cinema]string{
-	Agrafka:     "https://bilety.kinoagrafka.pl/",
-	Kijow:       "https://kupbilet.kijow.pl/",
-	Kika:        "https://bilety.kinokika.pl/",
-	Mikro:       "https://kinomikro.pl/",
-	Paradox:     "https://kinoparadox.pl/repertuar/",
-	PodBaranami: "https://www.kinopodbaranami.pl/",
-	Sfinks:      "https://kinosfinks.okn.edu.pl/",
+	Agrafka: "https://bilety.kinoagrafka.pl/",
+	Kijow:   "https://kupbilet.kijow.pl/",
+	Kika:    "https://bilety.kinokika.pl/",
+	Mikro:   "https://kinomikro.pl/",
+	Paradox: "https://kinoparadox.pl/repertuar/",
+	PodBaranami: "https://rezerwacja.kinopodbaranami.pl/Rezerwacja/default.aspx?event_id=%s" +
+		"&typetran=0&returnlink=http://kinopodbaranami.pl/rezerwacja_koniec.php&" +
+		"buylink=http://kinopodbaranami.pl/rezerwacja_koniec.php/",
+	Sfinks: "https://kinosfinks.okn.edu.pl/",
 }
 
 var cinemasToScrape = [...]scrapeSite{
@@ -215,9 +218,12 @@ func getShowingUrl(cinema cinema, e *colly.HTMLElement) string {
 		url, exists = e.DOM.Find("a.btn").Attr("href")
 
 	case PodBaranami:
+		// completely busted urls, need to work around them
 		url, exists = e.DOM.Find("a[onclick]").Attr("href")
 		if exists {
-			url = ticketBases[PodBaranami] + url
+			urlParts := strings.Split(url, "=")
+			showingId := urlParts[len(urlParts)-1]
+			url = fmt.Sprintf(ticketBases[PodBaranami], showingId)
 		}
 
 	case Sfinks:

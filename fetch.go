@@ -22,6 +22,7 @@ var cinemaApiIds = map[cinema]string{
 	CCityZakopianka: "1064",
 }
 
+// TODO cleanup
 var apiUrls = map[string]string{
 	"MultikinoBase":       "https://multikino.pl/",
 	"MultikinoCookies":    "https://multikino.pl/api/microservice/",
