@@ -1,3 +1,4 @@
+## Kino
 This project generates a summary of all available repertoires from all cinemas in the city of Kraków, while highlighting any movies that have been added to those repertoires recently, based on previously generated summaries stored in a local database.
 
 The summary can be stored as a textfile, if provided with flag `-log`, or sent as a notification via gotify, if provided with options `-origin` (address of the gotify server) and `-token` (gotify app token).

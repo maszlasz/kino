@@ -64,7 +64,7 @@ WaitForCinemas:
 		select {
 		case result = <-resultCh:
 
-		case <-time.After(10 * time.Second):
+		case <-time.After(120 * time.Second):
 			break WaitForCinemas
 		}
 
@@ -114,9 +114,9 @@ WaitForCinemas:
 	}
 
 	// sort showings per movie by datetime
-	for _, movie := range movies {
-		sort.Slice(movie, func(a, b int) bool {
-			return movie[a].time.Before(movie[b].time)
+	for _, showings := range movies {
+		sort.Slice(showings, func(a, b int) bool {
+			return showings[a].time.Before(showings[b].time)
 		})
 	}
 
@@ -296,8 +296,8 @@ func writeMovies(sb *strings.Builder, movies map[string][]showing) {
 
 	var lastDate time.Time
 	for _, title := range titles {
-		title = strings.Replace(title, "\"", "\\\"", -1)
-		titleLine := fmt.Sprintf(`## %s`, title)
+		titleFormatted := strings.Replace(title, "\"", "\\\"", -1)
+		titleLine := fmt.Sprintf(`## %s`, titleFormatted)
 		sb.WriteString(titleLine)
 
 		lastDate = time.Time{}
