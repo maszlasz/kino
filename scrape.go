@@ -77,7 +77,7 @@ func scrapeCinema(site scrapeSite, resultCh chan result) {
 		}
 	})
 
-	movies := make(map[string][]showing)
+	titleToShowings := make(map[string][]showing)
 
 	var lastDate string
 	c.OnHTML(site.rootSel, func(e *colly.HTMLElement) {
@@ -91,7 +91,7 @@ func scrapeCinema(site scrapeSite, resultCh chan result) {
 		url := getShowingUrl(cinema, e)
 
 		if !dateTime.Before(time.Now().Local()) {
-			movies[title] = append(movies[title], showing{cinema, dateTime, url})
+			titleToShowings[title] = append(titleToShowings[title], showing{cinema, dateTime, url})
 		}
 	})
 
@@ -105,7 +105,7 @@ func scrapeCinema(site scrapeSite, resultCh chan result) {
 	c.Visit(repertoires[cinema])
 	c.Wait()
 
-	resultCh <- result{cinema: cinema, movies: movies}
+	resultCh <- result{cinema: cinema, titleToShowings: titleToShowings}
 }
 
 func getTitle(cinema cinema, e *colly.HTMLElement) string {

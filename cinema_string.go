@@ -19,12 +19,12 @@ func _() {
 	_ = x[Multikino-8]
 	_ = x[Paradox-9]
 	_ = x[Sfinks-10]
-	_ = x[LAST-11]
+	_ = x[CINEMA_COUNT-11]
 }
 
-const _cinema_name = "AgrafkaCCityBonarkaCCityKazimierzCCityZakopiankaKijowKikaMikroPodBaranamiMultikinoParadoxSfinksLAST"
+const _cinema_name = "AgrafkaCCityBonarkaCCityKazimierzCCityZakopiankaKijowKikaMikroPodBaranamiMultikinoParadoxSfinksCINEMA_COUNT"
 
-var _cinema_index = [...]uint8{0, 7, 19, 33, 48, 53, 57, 62, 73, 82, 89, 95, 99}
+var _cinema_index = [...]uint8{0, 7, 19, 33, 48, 53, 57, 62, 73, 82, 89, 95, 107}
 
 func (i cinema) String() string {
 	idx := int(i) - 0

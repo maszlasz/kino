@@ -85,7 +85,7 @@ func fetchMultikino(cinema cinema, resultCh chan result) {
 		return
 	}
 
-	movies := make(map[string][]showing)
+	titleToShowings := make(map[string][]showing)
 	moviesJson := body["result"].([]any)
 
 	for _, e := range moviesJson {
@@ -106,10 +106,10 @@ func fetchMultikino(cinema cinema, resultCh chan result) {
 				showings = append(showings, showing{cinema, time, url})
 			}
 		}
-		movies[title] = showings
+		titleToShowings[title] = showings
 	}
 
-	resultCh <- result{cinema: cinema, movies: movies}
+	resultCh <- result{cinema: cinema, titleToShowings: titleToShowings}
 }
 
 func fetchCCity(cinema cinema, resultCh chan result) {
@@ -142,12 +142,12 @@ func fetchCCity(cinema cinema, resultCh chan result) {
 	}
 	res.Body.Close()
 
-	moviesCh := make(chan map[string][]showing)
+	titleToShowingsCh := make(chan map[string][]showing)
 	for _, date := range dates {
-		go fetchCCityDay(cinema, date, moviesCh)
+		go fetchCCityDay(cinema, date, titleToShowingsCh)
 	}
 
-	movies := make(map[string][]showing)
+	titleToShowings := make(map[string][]showing)
 	answerCountdown := len(dates)
 
 	// unnecessary
@@ -155,26 +155,26 @@ WaitForCCityDay:
 	for answerCountdown > 0 {
 		var dayMovies map[string][]showing
 		select {
-		case dayMovies = <-moviesCh:
+		case dayMovies = <-titleToShowingsCh:
 
 		case <-time.After(5 * time.Second):
 			break WaitForCCityDay
 		}
 
 		for dayTitle, dayShowings := range dayMovies {
-			if showings, ok := movies[dayTitle]; ok {
-				movies[dayTitle] = append(showings, dayShowings...)
+			if showings, ok := titleToShowings[dayTitle]; ok {
+				titleToShowings[dayTitle] = append(showings, dayShowings...)
 			} else {
-				movies[dayTitle] = dayShowings
+				titleToShowings[dayTitle] = dayShowings
 			}
 		}
 		answerCountdown -= 1
 	}
 
-	resultCh <- result{cinema: cinema, movies: movies}
+	resultCh <- result{cinema: cinema, titleToShowings: titleToShowings}
 }
 
-func fetchCCityDay(cinema cinema, date string, moviesCh chan map[string][]showing) {
+func fetchCCityDay(cinema cinema, date string, titleToShowingsCh chan map[string][]showing) {
 	client := &http.Client{}
 	moviesBasePath := apiUrls["CCityFilmsStart"] + cinemaApiIds[cinema] + apiUrls["CCityFilmsEnd"]
 	moviesPath := moviesBasePath + date
@@ -202,7 +202,7 @@ func fetchCCityDay(cinema cinema, date string, moviesCh chan map[string][]showin
 		idToTitle[id] = title
 	}
 
-	movies := make(map[string][]showing)
+	titleToShowings := make(map[string][]showing)
 	events := body["events"].([]any)
 	for _, event := range events {
 		eventMap := event.(map[string]any)
@@ -215,12 +215,12 @@ func fetchCCityDay(cinema cinema, date string, moviesCh chan map[string][]showin
 		url := eventMap["bookingLink"].(string)
 
 		event := showing{cinema, dateTime, url}
-		if showings, ok := movies["title"]; ok {
-			movies[title] = append(showings, event)
+		if showings, ok := titleToShowings["title"]; ok {
+			titleToShowings[title] = append(showings, event)
 		} else {
-			movies[title] = []showing{event}
+			titleToShowings[title] = []showing{event}
 		}
 	}
 
-	moviesCh <- movies
+	titleToShowingsCh <- titleToShowings
 }

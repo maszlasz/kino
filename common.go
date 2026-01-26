@@ -23,7 +23,7 @@ const (
 	Multikino
 	Paradox
 	Sfinks
-	LAST
+	CINEMA_COUNT
 )
 
 type showing struct {
@@ -33,11 +33,11 @@ type showing struct {
 }
 
 type result struct {
-	cinema cinema
-	movies map[string][]showing
+	cinema          cinema
+	titleToShowings map[string][]showing
 }
 
-var timeRegex = regexp.MustCompile("^(([0-1]?[0-9])|(2[0-3]))(:[0-5][0-9])+$")
+var timeRegex = regexp.MustCompile(`^(([0-1]?[0-9])|(2[0-3]))(:[0-5][0-9])+$`)
 
 var websites = map[cinema]string{
 	Agrafka:         "https://bilety.kinoagrafka.pl",
