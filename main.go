@@ -23,15 +23,19 @@ import (
 	_ "modernc.org/sqlite"
 )
 
-var excludedByKeywords = [...]string{"UKRAINIAN", "UKRAIŃSKI",
+var excludedByKeywords = [...]string{
+	"UKRAINIAN", "UKRAIŃSKI",
 	"DLA OSÓB", "KLUB SENIORA", "DKF KROPKA DLA DZIECI",
 }
 
 // TODO properly remove punctuation?
-var removedKeywords = [...]string{"2D", "3D", "DUBBING", "NAPISY",
+var removedKeywords = [...]string{
+	"2D", "3D", "DUBBING PL", "DUBBING", "NAPISY",
 	"TANI WTOREK", "DKF KROPKA", "DKF PEŁNA SALA",
 	"PRZEDPREMIERA", "ENG SUB", "POKAZ SPECJALNY Z DYSKUSJĄ",
 	"WERSJA REŻYSERSKA", "POKAZ SPECJALNY",
+	"POKAZ PRZEDPREMIEROWY", "WERSJA ORYGINALNA",
+	"NAJLEPSZE Z NAJGORSZYCH",
 }
 
 var allPunctuationRegex = regexp.MustCompile(`\p{P}`)
@@ -129,7 +133,7 @@ WaitForCinemas:
 				}
 			}
 
-			title = allPunctuationRegex.ReplaceAllString(title, "")
+			title = allPunctuationRegex.ReplaceAllString(title, " ")
 
 			for _, kw := range removedKeywords {
 				title = strings.ReplaceAll(title, kw, "")
